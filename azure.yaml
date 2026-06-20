@@ -1,0 +1,8 @@
+name: pulseplan
+services:
+  web:
+    project: .
+    host: containerapp
+    language: ts
+    docker:
+      path: Dockerfile

@@ -1,0 +1,14 @@
+node_modules
+.next
+.git
+.github
+.env
+.env.*
+*.local
+harness/report.md
+npm-debug.log*
+Dockerfile
+.dockerignore
+README.md
+PRD.md
+AGENTS.md

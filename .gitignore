@@ -1,2 +1,10 @@
 node_modules/
 venv/
+.next/
+dist/
+build/
+coverage/
+.env
+.env.local
+.env.*.local
+npm-debug.log*
