@@ -114,6 +114,40 @@ export function PulsePlanClient() {
     progress: 0,
   });
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [showPreview, setShowPreview] = useState(false);
+  const resultRef = useRef<HTMLDivElement>(null);
+  const hadPlanRef = useRef(false);
+
+  useEffect(() => {
+    const stored =
+      typeof window !== "undefined"
+        ? (localStorage.getItem("pulseplan-theme") as "light" | "dark" | null)
+        : null;
+    const initial =
+      stored ??
+      (typeof window !== "undefined" &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light");
+    // 마운트 시 1회 localStorage/시스템 설정과 동기화(외부 상태 반영) — 의도된 setState.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTheme(initial);
+    document.documentElement.setAttribute("data-theme", initial);
+  }, []);
+
+  function toggleTheme() {
+    setTheme((current) => {
+      const next = current === "dark" ? "light" : "dark";
+      document.documentElement.setAttribute("data-theme", next);
+      try {
+        localStorage.setItem("pulseplan-theme", next);
+      } catch {
+        // localStorage may be unavailable; ignore persistence errors
+      }
+      return next;
+    });
+  }
 
   useEffect(() => {
     const recognition = getRecognition();
@@ -399,11 +433,37 @@ export function PulsePlanClient() {
     ? streamState.explanation
     : (result?.explanation ?? []);
 
+  useEffect(() => {
+    if (plan && !hadPlanRef.current) {
+      hadPlanRef.current = true;
+      resultRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }
+    if (!plan) {
+      hadPlanRef.current = false;
+    }
+  }, [plan]);
+
   return (
     <div className="shell">
+      <div className="topbar">
+        <span className="eyebrow">Voice-first replanning workflow</span>
+        <button
+          className="theme-toggle"
+          type="button"
+          onClick={toggleTheme}
+          aria-label={
+            theme === "dark" ? "라이트 모드로 전환" : "다크 모드로 전환"
+          }
+        >
+          {theme === "dark" ? "☀️ 라이트 모드" : "🌙 다크 모드"}
+        </button>
+      </div>
+
       <section className="hero">
         <div className="card hero-main">
-          <span className="eyebrow">Voice-first replanning workflow</span>
           <h1>PulsePlan</h1>
           <p>
             회의 메모, 긴급 요청, 마감, 고정 일정, 집중 시간을 한 번에 말하면
@@ -414,8 +474,9 @@ export function PulsePlanClient() {
       </section>
 
       <section className="stack">
-        <div className="grid">
-          <div className="card panel">
+        <div className="flow-group">
+          <div className="card panel step-card">
+            <span className="step-pill">STEP 1 · 오늘 상황 입력</span>
             <div className="toolbar">
               <div>
                 <h2>오늘 상황 입력</h2>
@@ -556,12 +617,23 @@ export function PulsePlanClient() {
             </div>
           </div>
 
-          <div className="card panel">
-            <h2>계획 결과</h2>
+          <div className="card panel step-card" ref={resultRef}>
+            <div className="section-head">
+              <div>
+                <span className="step-pill">STEP 2 · 계획 결과</span>
+                <h2>계획 결과</h2>
+              </div>
+              <button
+                className="ghost"
+                type="button"
+                onClick={() => setShowPreview(true)}
+                disabled={!preview}
+              >
+                🔍 추출 미리보기
+              </button>
+            </div>
             {!plan ? (
-              <p className="subtle">
-                왼쪽에서 입력하면 여기 계획이 표시됩니다.
-              </p>
+              <p className="subtle">위에서 입력하면 여기 계획이 표시됩니다.</p>
             ) : null}
 
             {approval && plan ? (
@@ -654,7 +726,9 @@ export function PulsePlanClient() {
                         >
                           <strong
                             style={{
-                              color: block.changed ? "#8c4313" : "inherit",
+                              color: block.changed
+                                ? "var(--accent)"
+                                : "inherit",
                             }}
                           >
                             {block.title}
@@ -674,7 +748,7 @@ export function PulsePlanClient() {
                             style={{
                               marginTop: "12px",
                               paddingLeft: "12px",
-                              borderLeft: "2px solid rgba(255, 255, 255, 0.2)",
+                              borderLeft: "2px solid var(--line-strong)",
                             }}
                           >
                             <p
@@ -705,7 +779,7 @@ export function PulsePlanClient() {
                 style={{
                   marginTop: "24px",
                   paddingTop: "24px",
-                  borderTop: "1px solid rgba(255, 255, 255, 0.2)",
+                  borderTop: "1px solid var(--line)",
                 }}
               >
                 <button
@@ -746,68 +820,9 @@ export function PulsePlanClient() {
           </div>
         </div>
 
-        <div className="grid">
-          <div className="card panel">
-            <h2>추출 미리보기</h2>
-            <p className="subtle">
-              할 일, 고정 일정, 집중 시간대, 가정을 스트리밍 중간 결과로
-              보여줍니다.
-            </p>
-            {preview ? (
-              <div className="preview-list">
-                {preview.tasks.map((task) => (
-                  <div className="tile" key={task.id}>
-                    <div className="row">
-                      <strong>{task.title}</strong>
-                      <span className="badge">{task.durationMin}분</span>
-                    </div>
-                    <div className="hint">
-                      deadline {task.deadline ?? "없음"} · confidence{" "}
-                      {task.confidence.toFixed(2)}
-                    </div>
-                  </div>
-                ))}
-                {preview.fixed.map((item) => (
-                  <div className="tile" key={item.id}>
-                    <div className="row">
-                      <strong>{item.title}</strong>
-                      <span className="badge">
-                        {item.start} - {item.end}
-                      </span>
-                    </div>
-                    <div className="hint">고정 일정</div>
-                  </div>
-                ))}
-                {preview.focus.map((window) => (
-                  <div className="tile" key={window.id}>
-                    <div className="row">
-                      <strong>집중 시간대</strong>
-                      <span className="badge">
-                        {window.start} - {window.end}
-                      </span>
-                    </div>
-                    <div className="hint">우선 배치에 반영</div>
-                  </div>
-                ))}
-                {preview.assumptions.length ? (
-                  <div className="summary">
-                    <strong>가정</strong>
-                    {preview.assumptions.map((line) => (
-                      <span className="hint" key={line}>
-                        {line}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <div className="empty">
-                계획을 생성하면 추출 결과가 여기에 표시됩니다.
-              </div>
-            )}
-          </div>
-
-          <div className="card panel">
+        <div className="flow-group">
+          <div className="card panel step-card">
+            <span className="step-pill">STEP 3 · 오늘 시간표 제안</span>
             <h2>오늘 시간표 제안</h2>
             <p className="subtle">
               고정 일정은 먼저 보존하고, 남은 슬롯을 중요도와 마감으로 채웁니다.
@@ -860,7 +875,8 @@ export function PulsePlanClient() {
         </div>
 
         {plan && !approval ? (
-          <div className="card panel">
+          <div className="card panel step-card">
+            <span className="step-pill">STEP 4 · 긴급 변경 · 재계획</span>
             <h2>긴급 변경 - 재계획</h2>
             <p className="subtle">
               갑작스러운 일정이 생겼나요? 입력하면 남은 시간을 다시 짜줍니다.
@@ -896,6 +912,83 @@ export function PulsePlanClient() {
           </div>
         ) : null}
       </section>
+
+      {showPreview && preview ? (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPreview(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="추출 미리보기"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-head">
+              <h2>추출 미리보기</h2>
+              <button
+                className="icon-button"
+                type="button"
+                onClick={() => setShowPreview(false)}
+                aria-label="닫기"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="subtle">
+              음성/텍스트에서 추출한 할 일, 고정 일정, 집중 시간대, 가정입니다.
+            </p>
+            <div className="preview-list">
+              {preview.tasks.map((task) => (
+                <div className="tile" key={task.id}>
+                  <div className="row">
+                    <strong>{task.title}</strong>
+                    <span className="badge">{task.durationMin}분</span>
+                  </div>
+                  <div className="hint">
+                    deadline {task.deadline ?? "없음"} · confidence{" "}
+                    {task.confidence.toFixed(2)}
+                  </div>
+                </div>
+              ))}
+              {preview.fixed.map((item) => (
+                <div className="tile" key={item.id}>
+                  <div className="row">
+                    <strong>{item.title}</strong>
+                    <span className="badge">
+                      {item.start} - {item.end}
+                    </span>
+                  </div>
+                  <div className="hint">고정 일정</div>
+                </div>
+              ))}
+              {preview.focus.map((window) => (
+                <div className="tile" key={window.id}>
+                  <div className="row">
+                    <strong>집중 시간대</strong>
+                    <span className="badge">
+                      {window.start} - {window.end}
+                    </span>
+                  </div>
+                  <div className="hint">우선 배치에 반영</div>
+                </div>
+              ))}
+              {preview.assumptions.length ? (
+                <div className="summary">
+                  <strong>가정</strong>
+                  {preview.assumptions.map((line) => (
+                    <span className="hint" key={line}>
+                      {line}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

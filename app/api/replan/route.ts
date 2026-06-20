@@ -19,12 +19,12 @@ export async function POST(request: Request) {
     });
   }
 
-  const transcript = body?.transcript ?? store.currentTranscript();
-  const currentPlan = body?.currentPlan ?? store.currentPlan();
+  const transcript = body?.transcript ?? (await store.currentTranscript());
+  const currentPlan = body?.currentPlan ?? (await store.currentPlan());
 
   // 재계획은 즉시 응답이 중요하므로 결정적 플래너(에이전트 build_schedule 과 동일 엔진)를 사용한다.
   const replanned = replanDay(change, currentPlan, transcript);
-  store.saveDraft(`${transcript} 그리고 ${change}`.trim(), replanned);
+  await store.saveDraft(`${transcript} 그리고 ${change}`.trim(), replanned);
 
   return Response.json(replanned);
 }

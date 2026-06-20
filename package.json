@@ -9,6 +9,7 @@
         "lint": "eslint ."
     },
     "dependencies": {
+        "@azure/cosmos": "^4.9.3",
         "@github/copilot-sdk": "latest",
         "next": "latest",
         "react": "latest",

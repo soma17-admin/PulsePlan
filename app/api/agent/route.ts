@@ -64,7 +64,7 @@ export async function POST(request: Request) {
         result = planning;
       }
 
-      store.saveDraft(transcript, result);
+      await store.saveDraft(transcript, result);
       push("done", result);
       controller.close();
     },

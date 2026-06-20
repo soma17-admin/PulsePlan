@@ -12,6 +12,7 @@ PulsePlan은 정리되지 않은 하루 업무 입력을 실행 가능한 시간
 - SSE 스트리밍: 계획 생성 상태, 도구 단계, 결과를 순차적으로 노출
 - Copilot SDK 구동: 서버 전용 SDK 세션이 4개 도구(항목 추출→점수→시간표→설명)를 실제로 호출하고, Foundry 모델이 최종 요약을 생성
 - Azure AI Foundry(BYOK): Azure OpenAI `gpt-4o`를 provider로 연결, MCP(Azure MCP) 설정, 위험 작업 승인 게이트
+- Cosmos DB 영속화: 계획 스냅샷을 Azure Cosmos DB(SQL API)에 저장, 자격 미설정 시 인메모리로 자동 폴백
 - Azure 배포 산출물: Dockerfile, azure.yaml, standalone Next.js 빌드 설정
 
 ## 기술 선택
@@ -47,6 +48,7 @@ node harness/run.mjs
 - AZURE_OPENAI_DEPLOYMENT
 - AZURE_OPENAI_API_VERSION
 - NEXT_PUBLIC_DEMO_URL
+- COSMOS_ENDPOINT, COSMOS_KEY, COSMOS_DATABASE, COSMOS_CONTAINER (선택 — 설정 시 Cosmos DB 영속화, 미설정 시 인메모리)
 
 Azure 자격이 없더라도 로컬 플래너 경로로 앱과 harness는 동작합니다. Azure 자격이 있으면 Foundry 기반 Copilot 세션을 시도합니다.
 
@@ -91,7 +93,7 @@ az containerapp create -g pulseplan-rg -n pulseplan --environment pulseplan-env 
 - 계획 생성은 제안이며, 적용은 사용자가 승인합니다.
 - 위험한 도구 호출은 승인 게이트를 통해 차단되도록 설계했습니다.
 - 사용자 입력은 데이터로만 취급하며, 프롬프트 인젝션 지시를 실행하지 않습니다.
-- 데모 구현은 인메모리 저장소를 사용하며 입력 데이터는 세션 범위를 넘겨 영구 저장하지 않습니다.
+- 저장소는 Cosmos DB 자격이 있으면 계획 스냅샷을 영속화하고, 없으면 인메모리로 동작합니다(세션 범위 이상으로 영구 보관하지 않음).
 
 ## 구조
 
@@ -100,6 +102,7 @@ az containerapp create -g pulseplan-rg -n pulseplan --environment pulseplan-env 
 - [app/api/replan/route.ts](app/api/replan/route.ts): 변경 입력 기반 재계획 엔드포인트
 - [lib/planner.ts](lib/planner.ts): 추출, 점수화, 스케줄링, 설명, 재계획 로직
 - [lib/copilot.ts](lib/copilot.ts): Copilot SDK, Azure Foundry, MCP, 승인 게이트 래퍼
+- [lib/store.ts](lib/store.ts): 계획 스냅샷 저장소(Cosmos DB 영속화 + 인메모리 폴백)
 - [lib/normalize.ts](lib/normalize.ts): 한국어 STT 시간/숫자 정규화
 
 ## 현재 범위
