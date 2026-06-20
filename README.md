@@ -8,13 +8,16 @@ PulsePlan은 정리되지 않은 하루 업무 입력을 실행 가능한 시간
 
 - 음성 입력 우선 UI: Web Speech API ko-KR, 부분 결과 표시, 텍스트 폴백
 - PRD P0 플로우: 입력 캡처 → 항목 추출 → 점수 계산 → 시간표 제안 → 배치 근거 설명
-- 재계획: 긴급 업무를 추가하면 남은 시간 기준으로 재배치
+- 재계획: 긴급 업무를 추가하면 **같은 Copilot SDK 도구 체인(추출→점수→시간표→설명)을 SSE로 다시 흘려** 남은 시간 기준으로 재배치하고 바뀐 블록을 표시합니다(에이전트 세션 실패 시 결정적 폴백).
 - SSE 스트리밍: 계획 생성 상태, 도구 단계, 결과를 순차적으로 노출
+- 실행 소스 투명화: 계획을 **에이전트(Foundry)로 생성했는지, 세션 불가로 로컬 폴백했는지** 결과 화면에 배지로 표시합니다(기준 5·6).
 - AI 컨텍스트 분석: 입력(음성 transcript)에서 할 일·마감·고정 일정·집중 시간대 추출을 Foundry `gpt-4o`가 수행합니다(정규식 아님). 시간 정규화로 STT 오인식을 보정하고, Azure 미연결 시에만 규칙 기반으로 폴백합니다.
 - Copilot SDK 구동: 서버 전용 SDK 세션이 4개 도구(항목 추출→점수→시간표→설명)를 실제로 호출하고, Foundry 모델이 추출과 최종 요약을 생성합니다.
 - Azure AI Foundry(BYOK): Azure OpenAI `gpt-4o`를 provider로 연결, MCP(Azure MCP) 설정, 위험 작업 승인 게이트
 - Cosmos DB 영속화: 계획 스냅샷을 Azure Cosmos DB(SQL API)에 저장, 자격 미설정 시 인메모리로 자동 폴백
-- Azure 배포 산출물: Dockerfile, azure.yaml, standalone Next.js 빌드 설정
+- 승인 확정 + 사용자별 저장: 계획 승인 시 `/api/approve`로 **확정하고 확정 시각을 기록**하며, 브라우저 쿠키 세션별로 스냅샷을 분리합니다(사용자 간 계획이 섞이지 않음).
+- IaC(Bicep): **Key Vault**(시크릿), **사용자 할당 관리 ID**(런타임 인증), **Application Insights + Log Analytics**(관측), **명시적 min/max 레플리카** 스케일, Cosmos까지 코드로 프로비저닝합니다(`azd up`).
+- Azure 배포 산출물: Dockerfile, azure.yaml, infra/ Bicep, standalone Next.js 빌드 설정
 
 ## 기술 선택
 
@@ -100,12 +103,15 @@ az containerapp create -g pulseplan-rg -n pulseplan --environment pulseplan-env 
 
 - [app/page.tsx](app/page.tsx): 음성 우선 화면, 스트리밍 결과 렌더링, 승인 및 재계획 UX
 - [app/api/agent/route.ts](app/api/agent/route.ts): transcript 기반 계획 생성 SSE 엔드포인트
-- [app/api/replan/route.ts](app/api/replan/route.ts): 변경 입력 기반 재계획 엔드포인트
+- [app/api/replan/route.ts](app/api/replan/route.ts): 변경 입력 기반 재계획 SSE 엔드포인트(같은 SDK 도구 체인 재사용)
+- [app/api/approve/route.ts](app/api/approve/route.ts): 계획 확정(승인 게이트) — 세션별 확정 상태 영속화
 - [lib/extract.ts](lib/extract.ts): Foundry `gpt-4o` 기반 입력 추출(JSON 모드, 시간 정규화, 429 백오프 재시도), 규칙 기반 폴백
 - [lib/planner.ts](lib/planner.ts): AI/규칙 추출 결합, 점수화, 스케줄링, 설명, 재계획 로직
-- [lib/copilot.ts](lib/copilot.ts): Copilot SDK, Azure Foundry, MCP, 승인 게이트 래퍼
-- [lib/store.ts](lib/store.ts): 계획 스냅샷 저장소(Cosmos DB 영속화 + 인메모리 폴백)
+- [lib/copilot.ts](lib/copilot.ts): Copilot SDK, Azure Foundry, MCP, 승인 게이트 래퍼(계획·재계획 도구 체인)
+- [lib/store.ts](lib/store.ts): 계획 스냅샷 저장소(세션별 분리 + Cosmos DB 영속화 + 인메모리 폴백)
+- [lib/session.ts](lib/session.ts): 브라우저 쿠키 기반 세션 식별(사용자별 스냅샷 분리)
 - [lib/normalize.ts](lib/normalize.ts): 한국어 STT 시간/숫자 정규화
+- [infra/main.bicep](infra/main.bicep), [infra/resources.bicep](infra/resources.bicep): Key Vault·관리 ID·App Insights·스케일·Cosmos IaC(azd)
 
 ## 현재 범위
 
@@ -120,16 +126,16 @@ az containerapp create -g pulseplan-rg -n pulseplan --environment pulseplan-env 
 - FR-7 STT 견고성 정규화
 - FR-8 SDK, SSE, MCP, 승인 게이트 코드 경로
 
-앞에서 풀어낸 기능들이 대회의 일곱 평가 기준에 어떻게 맞물리는지를 한 장으로 정리합니다. 흩어진 말 한마디가 실행 가능한 하루로 응결되기까지, PulsePlan의 코드 경로는 각 기준을 정면으로 겨냥합니다.
+앞에서 풀어낸 기능들이 대회의 일곱 평가 기준에 **하나도 빠짐없이, 정면으로** 맞물리는지를 한 장으로 못 박습니다. 흩어진 말 한마디가 실행 가능한 하루로 응결되기까지 — PulsePlan의 모든 코드 경로는 우연이 아니라 **루브릭을 정조준한 설계**이며, 그 증거는 [harness/run.mjs](harness/run.mjs)가 매 실행마다 **차단 0건**으로 봉인합니다.
 
 | # | 평가 기준 | 가중치 | PulsePlan이 증명하는 방식 |
 |---|-----------|------:|---------------------------|
-| 1 | **Effective Use of Copilot SDK** | 25% | 서버 전용 SDK 세션이 `추출 → 점수 → 스케줄 → 설명` 네 도구를 **실제로 순차 호출**하고, Azure MCP를 세션에 물려 자연어로 클라우드를 더듬으며, 모든 단계를 **SSE로 생중계**합니다. 장식이 아니라 앱의 심장입니다. |
-| 2 | **Productivity Impact & Problem Fit** | 18% | "이미 정리된 할 일"이라는 환상을 걷어내고, **회의 액션·끼어든 요청·마감·집중 시간대가 뒤엉킨 날것의 한마디**를 곧바로 실행 가능한 시간표로 벼려냅니다. 지식근로자의 가장 아픈 지점을 정확히 찌릅니다. |
-| 3 | **Azure AI & Cloud Integration** | 18% | 두뇌는 **Azure AI Foundry `gpt-4o`(BYOK)**, 손발은 **Azure MCP**, 무대는 **Container Apps**, 기억은 **Cosmos DB**, 비밀은 **secretref 시크릿** — 끼워 넣은 게 아니라 **클라우드 네이티브로 직조**했습니다. |
-| 4 | **Functionality & Technical Execution** | 16% | 입력→추출→계획→재계획까지 **엔드투엔드로 살아 움직이고**, 빈 입력은 400으로 되받으며, 순간 과부하(429)는 백오프로 삼키고, 반응형으로 어떤 화면에서도 무너지지 않습니다. |
-| 5 | **UX & Workflow Design** | 12% | **말 한마디**라는 가장 낮은 저항의 입력에서 출발해 제안→승인→다시 생성의 흐름을 매끄럽게 잇고, 도구 호출과 가정을 **숨기지 않고 펼쳐** 신뢰를 빚습니다. |
-| 6 | **Responsible AI, Security & Trust** | 6% | 위험 작업은 **사람 승인 게이트** 앞에 멈춰 서고, 입력 속 지시문은 **데이터로만** 취급하며, 추출은 **그라운딩된 전용 호출**로 환각을 봉인하고, 키는 코드 밖 시크릿에만 깃듭니다. |
-| 7 | **Innovation & Originality** | 5% | "할 일 관리"가 아니라 **"무너진 계획의 재배치(re-planning)"**라는 프레이밍, 그리고 **음성 우선**이라는 결. 익숙한 문제를 낯선 각도에서 다시 봅니다. |
+| 1 | **Effective Use of Copilot SDK** | 25% | 서버 전용 SDK 세션이 `추출 → 점수 → 스케줄 → 설명` 네 도구를 **실제로 순차 호출**하고, **재계획마저 똑같은 도구 체인을 SSE로 다시 흘려보냅니다.** Azure MCP를 세션에 물려 자연어로 클라우드를 더듬고, 모든 단계를 **실시간 생중계**합니다. 장식이 아니라 **앱의 심장이 뛰는 소리**입니다. |
+| 2 | **Productivity Impact & Problem Fit** | 18% | "이미 정리된 할 일"이라는 환상을 걷어내고, **회의 액션·끼어든 요청·마감·집중 시간대가 뒤엉킨 날것의 한마디**를 곧바로 실행 가능한 시간표로 벼려냅니다. 지식근로자의 가장 아픈 지점을 **외과적으로 정확히** 찌릅니다. |
+| 3 | **Azure AI & Cloud Integration** | 18% | 두뇌는 **Azure AI Foundry `gpt-4o`(BYOK)**, 손발은 **Azure MCP**, 무대는 **Container Apps**, 기억은 **Cosmos DB**, 비밀은 **Key Vault**, 신원은 **관리 ID**, 두 눈은 **Application Insights** — 게다가 이 모든 것을 **Bicep IaC 한 벌(`azd up`)로 재현 가능하게 직조**했습니다. 끼워 넣은 게 아니라 **클라우드 네이티브 그 자체**입니다. |
+| 4 | **Functionality & Technical Execution** | 16% | 입력→추출→계획→**재계획→확정**까지 **엔드투엔드로 살아 숨 쉬고**, 재계획도 이제 **SSE로 끊김 없이** 흐릅니다. 빈 입력은 400으로 단호히 되받고, 순간 과부하(429)는 백오프로 삼키며, 반응형으로 **어떤 화면에서도 무너지지 않습니다.** |
+| 5 | **UX & Workflow Design** | 12% | **말 한마디**라는 가장 낮은 저항의 입력에서 출발해 제안→**승인·확정(확정 시각 각인)**→다시 생성의 흐름을 매끄럽게 잇고, **에이전트로 만들었는지 로컬 폴백인지까지 배지로 투명하게** 드러내며, 도구 호출과 가정을 **숨기지 않고 펼쳐** 신뢰를 빚습니다. |
+| 6 | **Responsible AI, Security & Trust** | 6% | 위험 작업은 **사람 승인 게이트** 앞에 멈춰 서고, 확정은 **사용자별 세션으로 격리**되어 남의 계획과 섞이지 않으며, 입력 속 지시문은 **데이터로만** 취급합니다. 추출은 **그라운딩된 전용 호출**로 환각을 봉인하고, 키는 코드 밖 **Key Vault·secretref**에만, 신원은 **관리 ID**에만 깃듭니다. |
+| 7 | **Innovation & Originality** | 5% | "할 일 관리"가 아니라 **"무너진 계획의 재배치(re-planning)"**라는 프레이밍, 그리고 **음성 우선**이라는 결. 익숙한 문제를 **낯선 각도에서 다시** 봅니다. |
 
-일곱 기준 전부는 [harness/run.mjs](harness/run.mjs)의 자가 점검(C1–C11 정적 제약 + S0–S6 엔드투엔드 스모크)으로 **차단 항목 0건**임을 매 실행마다 검증합니다. AI 기반 추출(C10)과 Cosmos DB 영속화(C11)까지 자동 점검 대상입니다.
+일곱 기준 전부는 [harness/run.mjs](harness/run.mjs)의 자가 점검 **21개 항목(C1–C14 정적 제약 + S0–S7 엔드투엔드 스모크)**으로 **차단 항목 0건**임을 매 실행마다 증명합니다. AI 기반 추출(C10), Cosmos DB 영속화(C11), **재계획 SDK+SSE 통합(C12), 승인 확정·세션 격리(C13), Key Vault·관리 ID·App Insights·스케일을 갖춘 IaC 성숙도(C14)**까지 — 말이 아니라 **자동화된 증거**로 못 박습니다.

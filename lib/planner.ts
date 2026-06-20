@@ -375,7 +375,7 @@ export async function planDayWithModel(
   };
 }
 
-function markChangedBlocks(
+export function markChangedBlocks(
   replanned: PlanningResult,
   currentPlan?: Plan | null,
 ): PlanningResult {

@@ -2,26 +2,33 @@ import type { Plan, PlanningResult } from "@/lib/types";
 
 type Snapshot = {
   id: string;
+  sessionId: string;
   transcript: string;
   latest: PlanningResult | null;
   approvedPlan: Plan | null;
+  approvedAt: string | null;
   updatedAt: string;
 };
 
-const SNAPSHOT_ID = "session:current";
+// 사용자(브라우저 쿠키)별로 스냅샷을 분리한다. 문서/파티션 키는 `session:{sessionId}`.
+function snapshotId(sessionId: string) {
+  return `session:${sessionId}`;
+}
 
-function emptySnapshot(): Snapshot {
+function emptySnapshot(sessionId: string): Snapshot {
   return {
-    id: SNAPSHOT_ID,
+    id: snapshotId(sessionId),
+    sessionId,
     transcript: "",
     latest: null,
     approvedPlan: null,
+    approvedAt: null,
     updatedAt: new Date().toISOString(),
   };
 }
 
-// 인메모리 폴백 겸 라이트스루 캐시. Cosmos 미설정/실패 시 단독 동작한다.
-let memory: Snapshot = emptySnapshot();
+// 인메모리 폴백 겸 라이트스루 캐시(세션 id → 스냅샷). Cosmos 미설정/실패 시 단독 동작한다.
+const memory = new Map<string, Snapshot>();
 
 const COSMOS_ENDPOINT = process.env.COSMOS_ENDPOINT;
 const COSMOS_KEY = process.env.COSMOS_KEY;
@@ -70,26 +77,26 @@ async function getContainer(): Promise<CosmosContainer | null> {
   return containerPromise;
 }
 
-async function load(): Promise<Snapshot> {
+async function load(sessionId: string): Promise<Snapshot> {
+  const id = snapshotId(sessionId);
+  const cached = memory.get(id);
   const container = await getContainer();
-  if (!container) return memory;
+  if (!container) return cached ?? emptySnapshot(sessionId);
   try {
-    const { resource } = await container
-      .item(SNAPSHOT_ID, SNAPSHOT_ID)
-      .read<Snapshot>();
+    const { resource } = await container.item(id, id).read<Snapshot>();
     if (resource) {
-      memory = resource;
+      memory.set(id, resource);
       return resource;
     }
   } catch (error) {
     console.error("[store] Cosmos 읽기 실패 — 인메모리 사용:", error);
   }
-  return memory;
+  return cached ?? emptySnapshot(sessionId);
 }
 
 async function persist(next: Snapshot): Promise<Snapshot> {
   next.updatedAt = new Date().toISOString();
-  memory = next;
+  memory.set(next.id, next);
   const container = await getContainer();
   if (container) {
     try {
@@ -102,20 +109,27 @@ async function persist(next: Snapshot): Promise<Snapshot> {
 }
 
 export const store = {
-  async saveDraft(transcript: string, result: PlanningResult) {
-    const current = await load();
+  async saveDraft(sessionId: string, transcript: string, result: PlanningResult) {
+    const current = await load(sessionId);
     return persist({ ...current, transcript, latest: result });
   },
-  async approveLatest() {
-    const current = await load();
+  // 승인 = 현재 초안을 확정 계획으로 고정하고 확정 시각을 남긴다(감사 추적).
+  async approveLatest(sessionId: string) {
+    const current = await load(sessionId);
     const approvedPlan = current.latest?.plan ?? null;
-    await persist({ ...current, approvedPlan });
-    return approvedPlan;
+    const approvedAt = approvedPlan ? new Date().toISOString() : null;
+    await persist({ ...current, approvedPlan, approvedAt });
+    return { plan: approvedPlan, approvedAt };
   },
-  async currentTranscript() {
-    return (await load()).transcript;
+  async currentTranscript(sessionId: string) {
+    return (await load(sessionId)).transcript;
   },
-  async currentPlan() {
-    return (await load()).latest?.plan ?? null;
+  async currentPlan(sessionId: string) {
+    return (await load(sessionId)).latest?.plan ?? null;
+  },
+  async approvedPlan(sessionId: string) {
+    const snapshot = await load(sessionId);
+    return { plan: snapshot.approvedPlan, approvedAt: snapshot.approvedAt };
   },
 };
+

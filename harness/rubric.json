@@ -12,6 +12,7 @@
         "C7_permission_gate",
         "C9_mcp_configured",
         "C10_ai_extraction",
+        "C12_replan_sdk_sse",
         "S2_agent_endpoint",
         "S3_streaming"
       ],
@@ -34,6 +35,7 @@
         "C4_deploy_artifacts",
         "C10_ai_extraction",
         "C11_cosmos_persistence",
+        "C14_iac_maturity",
         "S0_deployed_url"
       ],
       "review": "모델 계층이 Azure AI Foundry 위에서 동작 + Azure MCP 등 의미 있는 Azure 활용. 클라우드 네이티브 가점, 단순 끼워넣기 감점."
@@ -45,6 +47,8 @@
       "autoChecks": [
         "S1_server_up",
         "S2_agent_endpoint",
+        "C12_replan_sdk_sse",
+        "C13_approve_persist",
         "S4_error_handling",
         "S5_stt_robustness"
       ],
@@ -55,7 +59,8 @@
       "name": "User Experience & Workflow Design",
       "weight": 0.12,
       "autoChecks": [
-        "C8_voice_input"
+        "C8_voice_input",
+        "C13_approve_persist"
       ],
       "review": "음성 저저항 입력, 제안→승인 흐름, 지연/오류/투명성의 우아한 처리, 접근성, 사용자 주도권."
     },
@@ -65,7 +70,9 @@
       "weight": 0.06,
       "autoChecks": [
         "C5_no_secrets",
-        "C7_permission_gate"
+        "C7_permission_gate",
+        "C13_approve_persist",
+        "C14_iac_maturity"
       ],
       "review": "위험·Azure MCP 작업 전 사람 확인, 출력 투명성, 프라이버시, 환각 완화, 인젝션 인지, 시크릿/관리 ID 안전."
     },

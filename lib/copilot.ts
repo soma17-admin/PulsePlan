@@ -8,7 +8,9 @@ import { normalizeTranscript } from "@/lib/normalize";
 import {
   buildSchedule,
   extractItems,
+  markChangedBlocks,
   planDayWithModel,
+  replanDayWithModel,
   scoreTasks,
 } from "@/lib/planner";
 import type {
@@ -509,6 +511,34 @@ export async function buildFallbackPlanning(
   transcript: string,
 ): Promise<PlanningResult> {
   return planDayWithModel(transcript);
+}
+
+// 재계획도 동일한 Copilot SDK 도구 체인(extract→score→schedule→explain)으로 구동한다.
+// 변경 입력을 기존 맥락에 합쳐 세션에 보내고, 결과에서 바뀐 블록을 표시한다.
+// 세션/자격 실패 시 null → 라우트가 결정적 폴백으로 내려간다.
+export async function runCopilotReplan(
+  change: string,
+  currentPlan: Plan | null,
+  transcript: string,
+  emit?: EmitFn,
+): Promise<PlanningResult | null> {
+  const mergedTranscript = `${transcript} 그리고 ${change}`.trim();
+  const result = await runCopilotPlanning(mergedTranscript, emit, {
+    intent: "replan",
+  });
+  if (!result) {
+    return null;
+  }
+  return markChangedBlocks(result, currentPlan);
+}
+
+// 재계획 폴백: 변경 입력의 의미 분석은 Foundry 모델이, 점수·스케줄은 결정적 엔진이 처리한다.
+export async function buildFallbackReplan(
+  change: string,
+  currentPlan: Plan | null,
+  transcript: string,
+): Promise<PlanningResult> {
+  return replanDayWithModel(change, currentPlan, transcript);
 }
 
 // 서버 런타임에서 Copilot CLI 를 미리 띄워 첫 요청 지연을 줄인다(빌드 단계 제외).

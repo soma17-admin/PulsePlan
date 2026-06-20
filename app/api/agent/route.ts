@@ -3,6 +3,7 @@ import {
   foundryConfigured,
   runCopilotPlanning,
 } from "@/lib/copilot";
+import { getOrCreateSessionId } from "@/lib/session";
 import { store } from "@/lib/store";
 import type { PlanningResult } from "@/lib/types";
 
@@ -25,6 +26,9 @@ export async function POST(request: Request) {
     });
   }
 
+  // 사용자별 스냅샷 분리를 위해 스트림 시작 전에 세션 쿠키를 확정한다.
+  const sessionId = await getOrCreateSessionId();
+
   const stream = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
@@ -46,10 +50,18 @@ export async function POST(request: Request) {
       }
 
       // 2) 자격증명이 없거나 세션이 실패하면 로컬 플래너로 폴백(동일 이벤트 스트림).
+      //    폴백은 UI에 투명하게 표시한다(기준 5·6).
       if (!result) {
+        const usedFallback = foundryConfigured();
+        push("source", {
+          mode: usedFallback ? "fallback" : "local",
+          message: usedFallback
+            ? "에이전트 세션을 사용할 수 없어 로컬 플래너로 계획했습니다."
+            : "로컬 플래너로 계획했습니다(Azure Foundry 미연결).",
+        });
         const planning = await buildFallbackPlanning(transcript);
         push("status", {
-          message: foundryConfigured()
+          message: usedFallback
             ? "에이전트 세션을 사용할 수 없어 로컬 플래너로 계획했습니다."
             : "로컬 플래너로 계획했습니다(Azure Foundry 미연결).",
         });
@@ -62,9 +74,14 @@ export async function POST(request: Request) {
         push("tool", { name: "explain_plan", label: "배치 근거 설명" });
         push("explanation", planning.explanation);
         result = planning;
+      } else {
+        push("source", {
+          mode: "agent",
+          message: "Azure Foundry 에이전트가 도구 체인으로 계획했습니다.",
+        });
       }
 
-      await store.saveDraft(transcript, result);
+      await store.saveDraft(sessionId, transcript, result);
       push("done", result);
       controller.close();
     },

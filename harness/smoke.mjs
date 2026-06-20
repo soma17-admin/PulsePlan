@@ -197,26 +197,40 @@ export async function smoke() {
         ),
   );
 
-  // (참고) 재계획 엔드포인트 — 있으면 점검, 없으면 표시만
+  // S6: 재계획 엔드포인트 — 이제 Copilot SDK 도구 체인 + SSE 로 구동
   const replan = await postJson(BASE_URL + REPLAN_PATH, {
     change: "지금 긴급 장애 대응 1시간 추가",
     currentPlan: {},
   });
+  const rctype = replan.headers?.get?.("content-type") || "";
+  let rbody = "";
+  try {
+    rbody = replan.text ? await replan.text() : "";
+  } catch {}
+  const replanSSE =
+    /text\/event-stream/.test(rctype) || /^event:|^data:/m.test(rbody);
   if (replan.status && replan.status !== 404) {
     checks.push(
-      replan.status < 500
+      replan.status === 200 && replanSSE
         ? result(
             "S6_replan",
             "재계획 엔드포인트",
-            replan.status === 200 ? "pass" : "warn",
-            `${REPLAN_PATH} → ${replan.status}`,
+            "pass",
+            `${REPLAN_PATH} → 200, SSE 스트리밍`,
           )
-        : result(
-            "S6_replan",
-            "재계획 엔드포인트",
-            "warn",
-            `${REPLAN_PATH} → ${replan.status}`,
-          ),
+        : replan.status < 500
+          ? result(
+              "S6_replan",
+              "재계획 엔드포인트",
+              "warn",
+              `${REPLAN_PATH} → ${replan.status} (SSE ${replanSSE ? "감지" : "미감지"})`,
+            )
+          : result(
+              "S6_replan",
+              "재계획 엔드포인트",
+              "warn",
+              `${REPLAN_PATH} → ${replan.status}`,
+            ),
     );
   } else {
     checks.push(
@@ -225,6 +239,53 @@ export async function smoke() {
         "재계획 엔드포인트",
         "warn",
         `${REPLAN_PATH} 없음(또는 404). 재계획은 PulsePlan 차별화 기능`,
+      ),
+    );
+  }
+
+  // S7: 승인 확정 게이트 — 위험 작업(계획 확정) 전 사람 확인(기준 6)
+  // 같은 세션(쿠키)에서 계획 생성 후 확정 시 approvedAt 반환. 계획 없으면 409로 거부.
+  const planForApprove = await postJson(BASE_URL + AGENT_PATH, {
+    transcript: "오늘 회의록 정리하고 세시에 미팅",
+  });
+  const setCookie = planForApprove.headers?.get?.("set-cookie") || "";
+  try {
+    await (planForApprove.text ? planForApprove.text() : Promise.resolve());
+  } catch {}
+  const sid = (setCookie.match(/pulseplan_sid=[^;]+/) || [])[0] || "";
+  const approveRes = await fetchSafe(BASE_URL + "/api/approve", {
+    method: "POST",
+    headers: sid ? { Cookie: sid } : {},
+  });
+  let abody = "";
+  try {
+    abody = approveRes.text ? await approveRes.text() : "";
+  } catch {}
+  if (approveRes.status === 200 && /approvedAt/.test(abody)) {
+    checks.push(
+      result(
+        "S7_approve_gate",
+        "승인 확정 게이트",
+        "pass",
+        "계획 생성 후 확정 성공(approvedAt 반환, 세션별 저장)",
+      ),
+    );
+  } else if (approveRes.status === 409) {
+    checks.push(
+      result(
+        "S7_approve_gate",
+        "승인 확정 게이트",
+        "pass",
+        "계획 없을 때 확정 거부(409) — 안전한 게이트 동작",
+      ),
+    );
+  } else {
+    checks.push(
+      result(
+        "S7_approve_gate",
+        "승인 확정 게이트",
+        approveRes.status === 0 ? "fail" : "warn",
+        `/api/approve → ${approveRes.status || approveRes._error}`,
       ),
     );
   }

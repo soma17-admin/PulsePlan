@@ -339,6 +339,81 @@ export async function checkConstraints() {
         ),
   );
 
+  // C12: 재계획을 Copilot SDK 도구 체인 + SSE 로 구동 — 기준 1·4
+  const replanRouteSrc = (await readSafe("app/api/replan/route.ts")) || "";
+  const replanStreams =
+    /text\/event-stream/.test(replanRouteSrc) &&
+    /runCopilotReplan/.test(replanRouteSrc);
+  const replanInCopilot =
+    /runCopilotReplan/.test(copilotSrc) &&
+    /markChangedBlocks/.test(copilotSrc);
+  checks.push(
+    replanStreams && replanInCopilot
+      ? result(
+          "C12_replan_sdk_sse",
+          "재계획 SDK+SSE 통합",
+          "pass",
+          "재계획이 runCopilotReplan(도구 체인)+SSE 스트리밍으로 구동",
+        )
+      : result(
+          "C12_replan_sdk_sse",
+          "재계획 SDK+SSE 통합",
+          "warn",
+          "재계획이 SDK 도구 체인/SSE 를 거치지 않음(기준 1·4)",
+        ),
+  );
+
+  // C13: 승인 확정 + 사용자별 저장 — 기준 4·5·6
+  const approveRouteExists = existsSync(
+    path.join(ROOT, "app/api/approve/route.ts"),
+  );
+  const sessionScoped =
+    existsSync(path.join(ROOT, "lib/session.ts")) &&
+    /approveLatest\s*\(\s*sessionId/.test(storeSrc) &&
+    !/SNAPSHOT_ID\s*=\s*["']session:current["']/.test(storeSrc);
+  checks.push(
+    approveRouteExists && sessionScoped
+      ? result(
+          "C13_approve_persist",
+          "승인 확정+세션 저장",
+          "pass",
+          "approve 라우트 + 쿠키 세션별 approveLatest 로 확정 영속화",
+        )
+      : result(
+          "C13_approve_persist",
+          "승인 확정+세션 저장",
+          "warn",
+          "승인 확정/사용자별 저장 흔적 부족(기준 4·5·6)",
+        ),
+  );
+
+  // C14: IaC 성숙도 — Key Vault + 관리 ID + App Insights + 명시적 스케일. 기준 3·6
+  const bicepSrc =
+    (await readSafe("infra/resources.bicep")) ||
+    (await readSafe("infra/main.bicep")) ||
+    "";
+  const hasKeyVault = /Microsoft\.KeyVault/.test(bicepSrc);
+  const hasManagedId = /userAssignedIdentities/.test(bicepSrc);
+  const hasAppInsights = /Microsoft\.Insights\/components/.test(bicepSrc);
+  const hasScale = /minReplicas/.test(bicepSrc) && /maxReplicas/.test(bicepSrc);
+  const iacMature =
+    hasKeyVault && hasManagedId && hasAppInsights && hasScale;
+  checks.push(
+    iacMature
+      ? result(
+          "C14_iac_maturity",
+          "IaC 운영 성숙도",
+          "pass",
+          "Bicep 에 Key Vault·관리 ID·App Insights·명시적 스케일 포함",
+        )
+      : result(
+          "C14_iac_maturity",
+          "IaC 운영 성숙도",
+          "warn",
+          `Bicep 보강 필요: ${!hasKeyVault ? "KeyVault " : ""}${!hasManagedId ? "ManagedId " : ""}${!hasAppInsights ? "AppInsights " : ""}${!hasScale ? "Scale" : ""}`,
+        ),
+  );
+
   return checks;
 }
 

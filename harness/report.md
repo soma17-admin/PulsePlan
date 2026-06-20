@@ -1,8 +1,8 @@
 # PulsePlan 제출 전 자가 점검 리포트
-생성: 2026-06-20T06:30:05.509Z
+생성: 2026-06-20T07:18:42.503Z
 
 ## 요약
-- 자동 점검: 18개 / 실패 0 / 경고 0
+- 자동 점검: 22개 / 실패 0 / 경고 0
 - ✅ 차단(fail) 항목 없음
 
 ## 평가 기준별 자동 준비도
@@ -32,10 +32,14 @@
 | ✅ | C9_mcp_configured | MCP 구성 | mcpServers/Azure MCP 설정 흔적 있음 |
 | ✅ | C10_ai_extraction | AI 기반 입력 추출 | Foundry 모델이 항목 추출 수행(extractItemsWithModel + chat/completions + JSON 모드) |
 | ✅ | C11_cosmos_persistence | Cosmos DB 영속화 | @azure/cosmos CosmosClient로 계획 스넰샷 저장(인메모리 폴백) |
+| ✅ | C12_replan_sdk_sse | 재계획 SDK+SSE 통합 | 재계획이 runCopilotReplan(도구 체인)+SSE 스트리밍으로 구동 |
+| ✅ | C13_approve_persist | 승인 확정+세션 저장 | approve 라우트 + 쿠키 세션별 approveLatest 로 확정 영속화 |
+| ✅ | C14_iac_maturity | IaC 운영 성숙도 | Bicep 에 Key Vault·관리 ID·App Insights·명시적 스케일 포함 |
 | ✅ | S0_deployed_url | 배포 URL 응답 | https://pulseplan.livelywater-3bbbfa13.eastus.azurecontainerapps.io → 200 |
 | ✅ | S1_server_up | 서버 기동 | http://localhost:3000 → 200 |
-| ✅ | S2_agent_endpoint | 에이전트 엔드포인트 | /api/agent → 200, 2619B |
+| ✅ | S2_agent_endpoint | 에이전트 엔드포인트 | /api/agent → 200, 2691B |
 | ✅ | S3_streaming | 스트리밍 응답 | SSE(text/event-stream) 감지 |
 | ✅ | S4_error_handling | 오류 처리 | 빈 입력 → 400 |
 | ✅ | S5_stt_robustness | STT 견고성 | 오인식 섞인 입력 → 시간 포함 계획 응답 생성 |
-| ✅ | S6_replan | 재계획 엔드포인트 | /api/replan → 200 |
+| ✅ | S6_replan | 재계획 엔드포인트 | /api/replan → 200, SSE 스트리밍 |
+| ✅ | S7_approve_gate | 승인 확정 게이트 | 계획 없을 때 확정 거부(409) — 안전한 게이트 동작 |

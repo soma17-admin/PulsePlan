@@ -100,6 +100,11 @@ export function PulsePlanClient() {
   const [micState, setMicState] = useState<MicState>("idle");
   const [loading, setLoading] = useState(false);
   const [approval, setApproval] = useState(false);
+  const [confirmedAt, setConfirmedAt] = useState<string | null>(null);
+  const [approving, setApproving] = useState(false);
+  const [sourceMode, setSourceMode] = useState<
+    "agent" | "fallback" | "local" | null
+  >(null);
   const [error, setError] = useState("");
   const [traces, setTraces] = useState<Trace[]>([]);
   const [result, setResult] = useState<PlanningResult | null>(null);
@@ -190,8 +195,11 @@ export function PulsePlanClient() {
     };
   }, []);
 
-  async function consumePlanningStream(payload: { transcript: string }) {
-    const response = await fetch("/api/agent", {
+  async function consumePlanningStream(
+    url: string,
+    payload: Record<string, unknown>,
+  ) {
+    const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -302,6 +310,21 @@ export function PulsePlanClient() {
           return;
         }
 
+        if (parsed.event === "source") {
+          const data = parsed.data as {
+            mode: "agent" | "fallback" | "local";
+            message?: string;
+          };
+          setSourceMode(data.mode);
+          if (data.message) {
+            setStreamState((current) => ({
+              ...current,
+              copilotSummary: data.message ?? current.copilotSummary,
+            }));
+          }
+          return;
+        }
+
         if (parsed.event === "done") {
           finalResult = parsed.data as PlanningResult;
         }
@@ -319,6 +342,8 @@ export function PulsePlanClient() {
 
     setLoading(true);
     setApproval(false);
+    setConfirmedAt(null);
+    setSourceMode(null);
     setError("");
     setTraces([]);
     setStreamState({
@@ -332,7 +357,9 @@ export function PulsePlanClient() {
     setMicState("processing");
 
     try {
-      const nextResult = await consumePlanningStream({ transcript });
+      const nextResult = await consumePlanningStream("/api/agent", {
+        transcript,
+      });
       if (nextResult) {
         setResult(nextResult);
         setMicState("done");
@@ -357,33 +384,19 @@ export function PulsePlanClient() {
 
     setLoading(true);
     setError("");
+    setConfirmedAt(null);
+    setSourceMode(null);
     setMicState("processing");
 
     try {
-      const response = await fetch("/api/replan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          change,
-          currentPlan: result?.plan ?? streamState.plan,
-          transcript,
-        }),
+      const nextResult = await consumePlanningStream("/api/replan", {
+        change,
+        currentPlan: result?.plan ?? streamState.plan,
+        transcript,
       });
-
-      if (!response.ok) {
-        throw new Error("재계획 요청이 실패했습니다.");
+      if (nextResult) {
+        setResult(nextResult);
       }
-
-      const nextResult = (await response.json()) as PlanningResult;
-      setResult(nextResult);
-      setStreamState({
-        preview: nextResult.preview,
-        scoredTasks: nextResult.scoredTasks,
-        plan: nextResult.plan,
-        explanation: nextResult.explanation,
-        copilotSummary: "긴급 변경을 반영한 로컬 재계획 결과입니다.",
-        progress: 100,
-      });
       setTraces((current) => [
         ...current,
         {
@@ -402,6 +415,31 @@ export function PulsePlanClient() {
       );
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleApprove() {
+    setApproving(true);
+    setError("");
+    try {
+      const response = await fetch("/api/approve", { method: "POST" });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(payload?.error ?? "확정에 실패했습니다.");
+      }
+      const data = (await response.json()) as { approvedAt: string | null };
+      setConfirmedAt(data.approvedAt ?? new Date().toISOString());
+      setApproval(false);
+    } catch (nextError) {
+      setError(
+        nextError instanceof Error
+          ? nextError.message
+          : "확정 중 오류가 발생했습니다.",
+      );
+    } finally {
+      setApproving(false);
     }
   }
 
@@ -636,6 +674,40 @@ export function PulsePlanClient() {
               <p className="subtle">위에서 입력하면 여기 계획이 표시됩니다.</p>
             ) : null}
 
+            {plan && sourceMode ? (
+              <div
+                className="source-badge"
+                data-mode={sourceMode}
+                role="status"
+                aria-live="polite"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  marginBottom: "12px",
+                  padding: "6px 12px",
+                  borderRadius: "999px",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  background:
+                    sourceMode === "agent"
+                      ? "rgba(5, 150, 105, 0.1)"
+                      : "rgba(217, 119, 6, 0.12)",
+                  color: sourceMode === "agent" ? "#059669" : "#b45309",
+                  border:
+                    sourceMode === "agent"
+                      ? "1px solid rgba(5, 150, 105, 0.3)"
+                      : "1px solid rgba(217, 119, 6, 0.3)",
+                }}
+              >
+                {sourceMode === "agent"
+                  ? "⚡ Azure Foundry 에이전트가 도구 체인으로 생성"
+                  : sourceMode === "fallback"
+                    ? "⚠️ 에이전트 세션 불가 — 로컬 폴백으로 생성"
+                    : "ℹ️ 로컬 플래너로 생성 (Azure Foundry 미연결)"}
+              </div>
+            ) : null}
+
             {approval && plan ? (
               <div className="approval-gate">
                 <div
@@ -658,15 +730,17 @@ export function PulsePlanClient() {
                   >
                     <button
                       className="button"
-                      onClick={() => setApproval(false)}
+                      onClick={handleApprove}
                       type="button"
+                      disabled={approving}
                     >
-                      확정
+                      {approving ? "확정 중..." : "확정"}
                     </button>
                     <button
                       className="ghost"
                       onClick={() => setApproval(false)}
                       type="button"
+                      disabled={approving}
                     >
                       재검토
                     </button>
@@ -683,14 +757,45 @@ export function PulsePlanClient() {
                   gap: "12px",
                 }}
               >
-                <button
-                  className="button"
-                  onClick={() => setApproval(true)}
-                  type="button"
-                  aria-label="계획 승인하기"
-                >
-                  계획 승인
-                </button>
+                {confirmedAt ? (
+                  <div
+                    className="confirmed-banner"
+                    role="status"
+                    aria-live="polite"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "12px",
+                      padding: "12px 16px",
+                      borderRadius: "var(--radius-lg)",
+                      background: "rgba(5, 150, 105, 0.1)",
+                      border: "1px solid rgba(5, 150, 105, 0.3)",
+                    }}
+                  >
+                    <span style={{ fontWeight: 600, color: "#059669" }}>
+                      ✓ 확정됨 ·{" "}
+                      {new Date(confirmedAt).toLocaleTimeString("ko-KR")}
+                    </span>
+                    <button
+                      className="ghost"
+                      type="button"
+                      onClick={() => setConfirmedAt(null)}
+                      aria-label="확정 취소하고 다시 검토"
+                    >
+                      취소
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    className="button"
+                    onClick={() => setApproval(true)}
+                    type="button"
+                    aria-label="계획 승인하기"
+                  >
+                    계획 승인
+                  </button>
+                )}
                 {plan.blocks.map((block) => {
                   const blockKey = `${block.taskId}-${block.start}`;
                   return (

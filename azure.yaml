@@ -1,4 +1,8 @@
 name: pulseplan
+infra:
+  provider: bicep
+  path: infra
+  module: main
 services:
   web:
     project: .
