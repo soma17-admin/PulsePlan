@@ -140,8 +140,8 @@ function ensureCliPath() {
 export function foundryConfigured() {
   return Boolean(
     process.env.AZURE_OPENAI_ENDPOINT &&
-      process.env.AZURE_OPENAI_API_KEY &&
-      process.env.AZURE_OPENAI_DEPLOYMENT,
+    process.env.AZURE_OPENAI_API_KEY &&
+    process.env.AZURE_OPENAI_DEPLOYMENT,
   );
 }
 

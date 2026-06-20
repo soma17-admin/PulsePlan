@@ -18,7 +18,9 @@ try {
   console.log("starting client...");
   await client.start();
   console.log("client started OK");
-  const auth = await client.getAuthStatus().catch((e) => ({ error: e?.message }));
+  const auth = await client
+    .getAuthStatus()
+    .catch((e) => ({ error: e?.message }));
   console.log("authStatus:", JSON.stringify(auth));
 
   console.log("creating session (BYOK azure)...");
@@ -28,14 +30,19 @@ try {
       type: "azure",
       baseUrl: process.env.AZURE_OPENAI_ENDPOINT,
       apiKey: process.env.AZURE_OPENAI_API_KEY,
-      azure: { apiVersion: process.env.AZURE_OPENAI_API_VERSION ?? "2024-10-21" },
+      azure: {
+        apiVersion: process.env.AZURE_OPENAI_API_VERSION ?? "2024-10-21",
+      },
       modelId: "gpt-4o",
       wireModel: process.env.AZURE_OPENAI_DEPLOYMENT,
     },
     onPermissionRequest: async () => ({ kind: "approve-once" }),
   });
   console.log("session created OK");
-  const res = await session.sendAndWait({ prompt: "한 단어로만: 준비됐나?" }, 60000);
+  const res = await session.sendAndWait(
+    { prompt: "한 단어로만: 준비됐나?" },
+    60000,
+  );
   console.log("MODEL RESPONSE:", JSON.stringify(res?.data?.content ?? res));
   await session.disconnect();
 } catch (e) {
