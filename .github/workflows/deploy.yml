@@ -1,13 +1,12 @@
 name: Deploy to Azure Container Apps
 
-# 자동 실행은 main push 시, 수동 실행도 가능.
+# 수동 실행 전용(workflow_dispatch). 비용 방지를 위해 자동 main push 트리거를 비활성화함.
+# (Azure 리소스를 모두 삭제한 상태 — 재배포하려면 인프라를 먼저 프로비저닝한 뒤 수동 실행.)
 # 사전 준비(저장소 Secrets):
 #   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID  (OIDC 페더레이션 자격증명)
 #   AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_DEPLOYMENT, AZURE_OPENAI_API_VERSION
 # 비고: 이 구독은 ACR Tasks(클라우드 빌드)가 막혀 있어 러너에서 직접 docker build/push 한다.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
