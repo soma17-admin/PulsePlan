@@ -5,6 +5,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { execSync } from "node:child_process";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const ROOT = process.cwd();
 const result = (id, title, status, evidence) => ({
@@ -291,10 +292,57 @@ export async function checkConstraints() {
         ),
   );
 
+  // C10: AI 기반 입력 추출 — Foundry 모델이 항목 추출을 수행(정규식 아님). 기준 1·3
+  const extractSrc = (await readSafe("lib/extract.ts")) || "";
+  const plannerSrc = (await readSafe("lib/planner.ts")) || "";
+  const copilotSrc = (await readSafe("lib/copilot.ts")) || "";
+  const modelCall =
+    /chat\/completions/.test(extractSrc) && /response_format/.test(extractSrc);
+  const wiredIntoPipeline = /extractItemsWithModel/.test(
+    plannerSrc + copilotSrc,
+  );
+  checks.push(
+    modelCall && wiredIntoPipeline
+      ? result(
+          "C10_ai_extraction",
+          "AI 기반 입력 추출",
+          "pass",
+          "Foundry 모델이 항목 추출 수행(extractItemsWithModel + chat/completions + JSON 모드)",
+        )
+      : result(
+          "C10_ai_extraction",
+          "AI 기반 입력 추출",
+          "warn",
+          "모델 기반 추출 흔적 부족(정규식 폴백만 가능성). 기준 1·3",
+        ),
+  );
+
+  // C11: Cosmos DB 영속화 — 클라우드 네이티브 상태 저장(인메모리 폴백). 기준 3
+  const storeSrc = (await readSafe("lib/store.ts")) || "";
+  const cosmosPersist =
+    /@azure\/cosmos/.test(storeSrc) &&
+    /CosmosClient/.test(storeSrc) &&
+    /COSMOS_(ENDPOINT|KEY)/.test(storeSrc + envExample);
+  checks.push(
+    cosmosPersist
+      ? result(
+          "C11_cosmos_persistence",
+          "Cosmos DB 영속화",
+          "pass",
+          "@azure/cosmos CosmosClient로 계획 스넰샷 저장(인메모리 폴백)",
+        )
+      : result(
+          "C11_cosmos_persistence",
+          "Cosmos DB 영속화",
+          "warn",
+          "Cosmos DB 영속화 흔적 없음(클라우드 네이티브 가점). 기준 3",
+        ),
+  );
+
   return checks;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const checks = await checkConstraints();
   for (const c of checks)
     console.log(

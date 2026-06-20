@@ -47,7 +47,7 @@ export async function POST(request: Request) {
 
       // 2) 자격증명이 없거나 세션이 실패하면 로컬 플래너로 폴백(동일 이벤트 스트림).
       if (!result) {
-        const planning = buildFallbackPlanning(transcript);
+        const planning = await buildFallbackPlanning(transcript);
         push("status", {
           message: foundryConfigured()
             ? "에이전트 세션을 사용할 수 없어 로컬 플래너로 계획했습니다."

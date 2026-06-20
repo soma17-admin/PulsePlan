@@ -7,6 +7,7 @@
 // 미설정 시 안내만 출력하고 건너뛴다.
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const ROOT = process.cwd();
 const HERE = path.join(ROOT, "harness");
@@ -16,7 +17,13 @@ const KEY = process.env.AZURE_OPENAI_API_KEY;
 const DEPLOYMENT = process.env.AZURE_OPENAI_DEPLOYMENT;
 const API_VERSION = process.env.AZURE_OPENAI_API_VERSION || "2024-10-21";
 
-async function readSafe(p) { try { return await readFile(p, "utf8"); } catch { return ""; } }
+async function readSafe(p) {
+  try {
+    return await readFile(p, "utf8");
+  } catch {
+    return "";
+  }
+}
 
 export function judgeConfigured() {
   return Boolean(ENDPOINT && KEY && DEPLOYMENT);
@@ -25,21 +32,35 @@ export function judgeConfigured() {
 async function gatherEvidence(autoResults) {
   const readme = await readSafe(path.join(ROOT, "README.md"));
   const keyFiles = [
-    "lib/copilot.ts", "lib/tools.ts", "lib/store.ts", "lib/mcp.ts", "lib/normalize.ts",
-    "app/api/agent/route.ts", "app/api/replan/route.ts",
-    "components/VoiceInput.tsx", "AGENTS.md",
+    "lib/copilot.ts",
+    "lib/planner.ts",
+    "lib/extract.ts",
+    "lib/store.ts",
+    "lib/mcp.ts",
+    "lib/normalize.ts",
+    "app/api/agent/route.ts",
+    "app/api/replan/route.ts",
+    "components/PulsePlanClient.tsx",
+    "AGENTS.md",
   ];
   let code = "";
   for (const f of keyFiles) {
     const src = await readSafe(path.join(ROOT, f));
     if (src) code += `\n\n===== ${f} =====\n${src.slice(0, 4000)}`;
   }
-  return { readme: readme.slice(0, 6000), code: code.slice(0, 16000), autoResults };
+  return {
+    readme: readme.slice(0, 6000),
+    code: code.slice(0, 16000),
+    autoResults,
+  };
 }
 
 export async function judge(autoResults) {
   if (!judgeConfigured()) {
-    return { skipped: true, reason: "AZURE_OPENAI_* 환경변수 미설정으로 LLM 채점 건너뜀" };
+    return {
+      skipped: true,
+      reason: "AZURE_OPENAI_* 환경변수 미설정으로 LLM 채점 건너뜀",
+    };
   }
   const rubric = JSON.parse(await readSafe(path.join(HERE, "rubric.json")));
   const evidence = await gatherEvidence(autoResults);
@@ -53,10 +74,14 @@ export async function judge(autoResults) {
   ].join("\n");
 
   const user = [
-    "## 루브릭", JSON.stringify(rubric.criteria, null, 2),
-    "## 자동 점검 결과(JSON)", JSON.stringify(evidence.autoResults, null, 2),
-    "## README", evidence.readme,
-    "## 핵심 소스", evidence.code,
+    "## 루브릭",
+    JSON.stringify(rubric.criteria, null, 2),
+    "## 자동 점검 결과(JSON)",
+    JSON.stringify(evidence.autoResults, null, 2),
+    "## README",
+    evidence.readme,
+    "## 핵심 소스",
+    evidence.code,
   ].join("\n\n");
 
   const url = `${ENDPOINT.replace(/\/$/, "")}/openai/deployments/${DEPLOYMENT}/chat/completions?api-version=${API_VERSION}`;
@@ -66,7 +91,10 @@ export async function judge(autoResults) {
       method: "POST",
       headers: { "Content-Type": "application/json", "api-key": KEY },
       body: JSON.stringify({
-        messages: [{ role: "system", content: system }, { role: "user", content: user }],
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
         temperature: 0,
         response_format: { type: "json_object" },
       }),
@@ -80,7 +108,11 @@ export async function judge(autoResults) {
   const data = await res.json();
   const content = data?.choices?.[0]?.message?.content || "{}";
   let parsed;
-  try { parsed = JSON.parse(content); } catch { return { skipped: true, reason: "JSON 파싱 실패", raw: content }; }
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return { skipped: true, reason: "JSON 파싱 실패", raw: content };
+  }
 
   // 가중 합산
   const byId = Object.fromEntries((parsed.scores || []).map((s) => [s.id, s]));
@@ -88,12 +120,18 @@ export async function judge(autoResults) {
   const detail = rubric.criteria.map((c) => {
     const s = byId[c.id]?.score ?? 0;
     weighted += (s / 100) * c.weight;
-    return { id: c.id, name: c.name, weight: c.weight, score: s, reason: byId[c.id]?.reason || "" };
+    return {
+      id: c.id,
+      name: c.name,
+      weight: c.weight,
+      score: s,
+      reason: byId[c.id]?.reason || "",
+    };
   });
   return { skipped: false, total: Math.round(weighted * 100), detail };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const out = await judge([]);
   console.log(JSON.stringify(out, null, 2));
 }

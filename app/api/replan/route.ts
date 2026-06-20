@@ -1,4 +1,4 @@
-import { replanDay } from "@/lib/planner";
+import { replanDayWithModel } from "@/lib/planner";
 import { store } from "@/lib/store";
 import type { Plan } from "@/lib/types";
 
@@ -22,8 +22,8 @@ export async function POST(request: Request) {
   const transcript = body?.transcript ?? (await store.currentTranscript());
   const currentPlan = body?.currentPlan ?? (await store.currentPlan());
 
-  // 재계획은 즉시 응답이 중요하므로 결정적 플래너(에이전트 build_schedule 과 동일 엔진)를 사용한다.
-  const replanned = replanDay(change, currentPlan, transcript);
+  // 변경 입력의 의미 분석은 Foundry 모델이 수행하고, 스케줄링은 결정적 엔진이 처리한다.
+  const replanned = await replanDayWithModel(change, currentPlan, transcript);
   await store.saveDraft(`${transcript} 그리고 ${change}`.trim(), replanned);
 
   return Response.json(replanned);

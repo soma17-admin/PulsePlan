@@ -1,8 +1,8 @@
-# TodayMate 제출 전 자가 점검 리포트
-생성: 2026-06-20T04:16:10.600Z
+# PulsePlan 제출 전 자가 점검 리포트
+생성: 2026-06-20T06:30:05.509Z
 
 ## 요약
-- 자동 점검: 16개 / 실패 0 / 경고 0
+- 자동 점검: 18개 / 실패 0 / 경고 0
 - ✅ 차단(fail) 항목 없음
 
 ## 평가 기준별 자동 준비도
@@ -30,9 +30,11 @@
 | ✅ | C7_permission_gate | 위험작업 승인 게이트 | onPermissionRequest 기반 승인 흐름 있음 |
 | ✅ | C8_voice_input | 음성 입력 | 음성인식(Web Speech/Azure Speech) 흔적 있음 |
 | ✅ | C9_mcp_configured | MCP 구성 | mcpServers/Azure MCP 설정 흔적 있음 |
+| ✅ | C10_ai_extraction | AI 기반 입력 추출 | Foundry 모델이 항목 추출 수행(extractItemsWithModel + chat/completions + JSON 모드) |
+| ✅ | C11_cosmos_persistence | Cosmos DB 영속화 | @azure/cosmos CosmosClient로 계획 스넰샷 저장(인메모리 폴백) |
 | ✅ | S0_deployed_url | 배포 URL 응답 | https://pulseplan.livelywater-3bbbfa13.eastus.azurecontainerapps.io → 200 |
 | ✅ | S1_server_up | 서버 기동 | http://localhost:3000 → 200 |
-| ✅ | S2_agent_endpoint | 에이전트 엔드포인트 | /api/agent → 200, 3046B |
+| ✅ | S2_agent_endpoint | 에이전트 엔드포인트 | /api/agent → 200, 2619B |
 | ✅ | S3_streaming | 스트리밍 응답 | SSE(text/event-stream) 감지 |
 | ✅ | S4_error_handling | 오류 처리 | 빈 입력 → 400 |
 | ✅ | S5_stt_robustness | STT 견고성 | 오인식 섞인 입력 → 시간 포함 계획 응답 생성 |

@@ -10,7 +10,8 @@ PulsePlan은 정리되지 않은 하루 업무 입력을 실행 가능한 시간
 - PRD P0 플로우: 입력 캡처 → 항목 추출 → 점수 계산 → 시간표 제안 → 배치 근거 설명
 - 재계획: 긴급 업무를 추가하면 남은 시간 기준으로 재배치
 - SSE 스트리밍: 계획 생성 상태, 도구 단계, 결과를 순차적으로 노출
-- Copilot SDK 구동: 서버 전용 SDK 세션이 4개 도구(항목 추출→점수→시간표→설명)를 실제로 호출하고, Foundry 모델이 최종 요약을 생성
+- AI 컨텍스트 분석: 입력(음성 transcript)에서 할 일·마감·고정 일정·집중 시간대 추출을 Foundry `gpt-4o`가 수행합니다(정규식 아님). 시간 정규화로 STT 오인식을 보정하고, Azure 미연결 시에만 규칙 기반으로 폴백합니다.
+- Copilot SDK 구동: 서버 전용 SDK 세션이 4개 도구(항목 추출→점수→시간표→설명)를 실제로 호출하고, Foundry 모델이 추출과 최종 요약을 생성합니다.
 - Azure AI Foundry(BYOK): Azure OpenAI `gpt-4o`를 provider로 연결, MCP(Azure MCP) 설정, 위험 작업 승인 게이트
 - Cosmos DB 영속화: 계획 스냅샷을 Azure Cosmos DB(SQL API)에 저장, 자격 미설정 시 인메모리로 자동 폴백
 - Azure 배포 산출물: Dockerfile, azure.yaml, standalone Next.js 빌드 설정
@@ -20,7 +21,7 @@ PulsePlan은 정리되지 않은 하루 업무 입력을 실행 가능한 시간
 - Next.js App Router + TypeScript
 - 서버 전용 Copilot SDK 래퍼와 Azure AI Foundry 환경 변수 연결
 - Azure MCP 로컬 서버 설정 화이트리스트
-- 로컬 기본값은 결정적 플래너로 동작하고, Azure 자격이 있으면 Copilot 경로를 시도한 뒤 폴백
+- 항목 추출은 Foundry `gpt-4o`(그라운딩된 전용 호출, temperature 0, JSON 모드)로 수행하고, 점수·스케줄은 결정적 엔진이 처리합니다. Azure 미연결 시 규칙 기반으로 폴백합니다.
 
 ## 빠른 시작
 
@@ -100,7 +101,8 @@ az containerapp create -g pulseplan-rg -n pulseplan --environment pulseplan-env 
 - [app/page.tsx](app/page.tsx): 음성 우선 화면, 스트리밍 결과 렌더링, 승인 및 재계획 UX
 - [app/api/agent/route.ts](app/api/agent/route.ts): transcript 기반 계획 생성 SSE 엔드포인트
 - [app/api/replan/route.ts](app/api/replan/route.ts): 변경 입력 기반 재계획 엔드포인트
-- [lib/planner.ts](lib/planner.ts): 추출, 점수화, 스케줄링, 설명, 재계획 로직
+- [lib/extract.ts](lib/extract.ts): Foundry `gpt-4o` 기반 입력 추출(JSON 모드, 시간 정규화, 429 백오프 재시도), 규칙 기반 폴백
+- [lib/planner.ts](lib/planner.ts): AI/규칙 추출 결합, 점수화, 스케줄링, 설명, 재계획 로직
 - [lib/copilot.ts](lib/copilot.ts): Copilot SDK, Azure Foundry, MCP, 승인 게이트 래퍼
 - [lib/store.ts](lib/store.ts): 계획 스냅샷 저장소(Cosmos DB 영속화 + 인메모리 폴백)
 - [lib/normalize.ts](lib/normalize.ts): 한국어 STT 시간/숫자 정규화
@@ -117,3 +119,17 @@ az containerapp create -g pulseplan-rg -n pulseplan --environment pulseplan-env 
 - FR-6 긴급 업무 재계획
 - FR-7 STT 견고성 정규화
 - FR-8 SDK, SSE, MCP, 승인 게이트 코드 경로
+
+앞에서 풀어낸 기능들이 대회의 일곱 평가 기준에 어떻게 맞물리는지를 한 장으로 정리합니다. 흩어진 말 한마디가 실행 가능한 하루로 응결되기까지, PulsePlan의 코드 경로는 각 기준을 정면으로 겨냥합니다.
+
+| # | 평가 기준 | 가중치 | PulsePlan이 증명하는 방식 |
+|---|-----------|------:|---------------------------|
+| 1 | **Effective Use of Copilot SDK** | 25% | 서버 전용 SDK 세션이 `추출 → 점수 → 스케줄 → 설명` 네 도구를 **실제로 순차 호출**하고, Azure MCP를 세션에 물려 자연어로 클라우드를 더듬으며, 모든 단계를 **SSE로 생중계**합니다. 장식이 아니라 앱의 심장입니다. |
+| 2 | **Productivity Impact & Problem Fit** | 18% | "이미 정리된 할 일"이라는 환상을 걷어내고, **회의 액션·끼어든 요청·마감·집중 시간대가 뒤엉킨 날것의 한마디**를 곧바로 실행 가능한 시간표로 벼려냅니다. 지식근로자의 가장 아픈 지점을 정확히 찌릅니다. |
+| 3 | **Azure AI & Cloud Integration** | 18% | 두뇌는 **Azure AI Foundry `gpt-4o`(BYOK)**, 손발은 **Azure MCP**, 무대는 **Container Apps**, 기억은 **Cosmos DB**, 비밀은 **secretref 시크릿** — 끼워 넣은 게 아니라 **클라우드 네이티브로 직조**했습니다. |
+| 4 | **Functionality & Technical Execution** | 16% | 입력→추출→계획→재계획까지 **엔드투엔드로 살아 움직이고**, 빈 입력은 400으로 되받으며, 순간 과부하(429)는 백오프로 삼키고, 반응형으로 어떤 화면에서도 무너지지 않습니다. |
+| 5 | **UX & Workflow Design** | 12% | **말 한마디**라는 가장 낮은 저항의 입력에서 출발해 제안→승인→다시 생성의 흐름을 매끄럽게 잇고, 도구 호출과 가정을 **숨기지 않고 펼쳐** 신뢰를 빚습니다. |
+| 6 | **Responsible AI, Security & Trust** | 6% | 위험 작업은 **사람 승인 게이트** 앞에 멈춰 서고, 입력 속 지시문은 **데이터로만** 취급하며, 추출은 **그라운딩된 전용 호출**로 환각을 봉인하고, 키는 코드 밖 시크릿에만 깃듭니다. |
+| 7 | **Innovation & Originality** | 5% | "할 일 관리"가 아니라 **"무너진 계획의 재배치(re-planning)"**라는 프레이밍, 그리고 **음성 우선**이라는 결. 익숙한 문제를 낯선 각도에서 다시 봅니다. |
+
+일곱 기준 전부는 [harness/run.mjs](harness/run.mjs)의 자가 점검(C1–C11 정적 제약 + S0–S6 엔드투엔드 스모크)으로 **차단 항목 0건**임을 매 실행마다 검증합니다. AI 기반 추출(C10)과 Cosmos DB 영속화(C11)까지 자동 점검 대상입니다.

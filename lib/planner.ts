@@ -1,3 +1,4 @@
+import { extractItemsWithModel } from "@/lib/extract";
 import { formatTime, normalizeTranscript } from "@/lib/normalize";
 import type {
   ExtractedItems,
@@ -317,11 +318,7 @@ export function buildSchedule(
   };
 }
 
-export function planDay(transcript: string): PlanningResult {
-  const normalizedTranscript = normalizeTranscript(transcript);
-  const preview = extractItems(normalizedTranscript);
-  const scoredTasks = scoreTasks(preview.tasks);
-  const plan = buildSchedule(preview, scoredTasks);
+function planExplanation(preview: ExtractedItems, plan: Plan): string[] {
   const explanation = [
     "고정 일정은 먼저 고정하고, 남은 슬롯에 중요도와 마감을 기준으로 작업을 배치했습니다.",
     preview.focus.length
@@ -337,6 +334,17 @@ export function planDay(transcript: string): PlanningResult {
     explanation.push(`가정: ${preview.assumptions.join(" ")}`);
   }
 
+  return explanation;
+}
+
+// 정규식 기반(결정적) 계획. Azure 자격이 없을 때의 폴백 경로.
+export function planDay(transcript: string): PlanningResult {
+  const normalizedTranscript = normalizeTranscript(transcript);
+  const preview = extractItems(normalizedTranscript);
+  const scoredTasks = scoreTasks(preview.tasks);
+  const plan = buildSchedule(preview, scoredTasks);
+  const explanation = planExplanation(preview, plan);
+
   return {
     normalizedTranscript,
     preview,
@@ -346,13 +354,31 @@ export function planDay(transcript: string): PlanningResult {
   };
 }
 
-export function replanDay(
-  change: string,
+// 입력 의미 분석(추출)을 Foundry gpt-4o 가 수행하고, 점수·스케줄은 결정적 엔진이 처리한다.
+// 모델 추출 실패(자격 없음/오류) 시 정규식 추출로 폴백한다.
+export async function planDayWithModel(
+  transcript: string,
+): Promise<PlanningResult> {
+  const normalizedTranscript = normalizeTranscript(transcript);
+  const aiItems = await extractItemsWithModel(transcript);
+  const preview = aiItems ?? extractItems(normalizedTranscript);
+  const scoredTasks = scoreTasks(preview.tasks);
+  const plan = buildSchedule(preview, scoredTasks);
+  const explanation = planExplanation(preview, plan);
+
+  return {
+    normalizedTranscript,
+    preview,
+    scoredTasks,
+    plan,
+    explanation,
+  };
+}
+
+function markChangedBlocks(
+  replanned: PlanningResult,
   currentPlan?: Plan | null,
-  transcript = "",
-) {
-  const mergedTranscript = `${transcript} 그리고 ${change}`.trim();
-  const replanned = planDay(mergedTranscript);
+): PlanningResult {
   const currentBlocks = Array.isArray(currentPlan?.blocks)
     ? currentPlan.blocks
     : [];
@@ -371,4 +397,27 @@ export function replanDay(
   ];
 
   return replanned;
+}
+
+// 정규식 기반 재계획(폴백).
+export function replanDay(
+  change: string,
+  currentPlan?: Plan | null,
+  transcript = "",
+): PlanningResult {
+  const mergedTranscript = `${transcript} 그리고 ${change}`.trim();
+  return markChangedBlocks(planDay(mergedTranscript), currentPlan);
+}
+
+// 변경 입력의 의미 분석도 Foundry gpt-4o 가 수행하는 재계획.
+export async function replanDayWithModel(
+  change: string,
+  currentPlan?: Plan | null,
+  transcript = "",
+): Promise<PlanningResult> {
+  const mergedTranscript = `${transcript} 그리고 ${change}`.trim();
+  return markChangedBlocks(
+    await planDayWithModel(mergedTranscript),
+    currentPlan,
+  );
 }
